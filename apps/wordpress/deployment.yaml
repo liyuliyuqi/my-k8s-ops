@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress
+  namespace: magedu
+spec:
+  replicas: 1                          # P7 时交给 HPA 管(1~4)
+  selector:
+    matchLabels: {app: wordpress}
+  template:
+    metadata:
+      labels: {app: wordpress}
+    spec:
+      containers:
+      - name: wordpress
+        image: wordpress:6-apache
+        env:
+        - {name: WORDPRESS_DB_HOST, value: "mysql"}     # 集群内 DNS:直接写 Service 名(第一阶段 hosts 文件的集群版)
+        - name: WORDPRESS_DB_NAME
+          valueFrom: {secretKeyRef: {name: mysql-secret, key: MYSQL_DATABASE}}
+        - name: WORDPRESS_DB_USER
+          valueFrom: {secretKeyRef: {name: mysql-secret, key: MYSQL_USER}}
+        - name: WORDPRESS_DB_PASSWORD
+          valueFrom: {secretKeyRef: {name: mysql-secret, key: MYSQL_PASSWORD}}
+        ports:
+        - containerPort: 80
+        resources:
+          requests: {cpu: 100m, memory: 128Mi}   # requests.cpu 是 P7 HPA 的计算基准,必须设
+          limits:   {cpu: 500m, memory: 512Mi}
+        readinessProbe:
+          httpGet: {path: /, port: 80}
+          initialDelaySeconds: 20
+        volumeMounts:
+        - {name: wp-data, mountPath: /var/www/html}
+      volumes:
+      - name: wp-data
+        persistentVolumeClaim: {claimName: wp-pvc}      # 主题/插件/上传文件都在这(P4 备份要备它)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress
+  namespace: magedu
+spec:
+  selector: {app: wordpress}
+  ports:
+  - {port: 80, targetPort: 80}
