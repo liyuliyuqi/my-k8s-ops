@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: magedu
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: mysql}
+  template:
+    metadata:
+      labels: {app: mysql}
+    spec:
+      nodeSelector: {kubernetes.io/hostname: k8s-node1}   # local-path 数据绑死单节点,钉住防 Pod 漂走丢数据
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        envFrom:
+        - secretRef: {name: mysql-secret}                 # 密码从保险盒注入,不写进镜像不进命令行
+        ports:
+        - containerPort: 3306
+        resources:                                         # requests=调度依据,limits=上限(2C4G 省着用的声明式版)
+          requests: {cpu: 200m, memory: 512Mi}
+          limits:   {cpu: "1",  memory: 1Gi}
+        livenessProbe:                                     # 存活探针:挂了自动重启容器
+          exec:
+            command: ["sh", "-c", "mysqladmin ping -h 127.0.0.1 -p\"$MYSQL_ROOT_PASSWORD\""]
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:                                    # 就绪探针:没准备好不接流量(对应 nginx 摘后端)
+          tcpSocket: {port: 3306}
+          initialDelaySeconds: 15
+        volumeMounts:
+        - {name: data, mountPath: /var/lib/mysql}
+      volumes:
+      - name: data
+        persistentVolumeClaim: {claimName: mysql-pvc}      # 数据挂 PVC,生命周期独立于 Pod
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: magedu
+spec:
+  selector: {app: mysql}
+  ports:
+  - {port: 3306, targetPort: 3306}
