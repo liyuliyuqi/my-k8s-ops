@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: magedu-ingress
+  namespace: magedu
+  annotations:
+    nginx.ingress.kubernetes.io/affinity: "cookie"        # 会话亲和:同一用户粘同一后端(第一阶段 nginx ip_hash 的云原生版)
+    nginx.ingress.kubernetes.io/session-cookie-name: "ROUTE"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: wordpress.magedu.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend: {service: {name: wordpress, port: {number: 80}}}

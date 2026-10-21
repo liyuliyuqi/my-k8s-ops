@@ -28,7 +28,7 @@ spec:
           requests: {cpu: 100m, memory: 128Mi}   # requests.cpu 是 P7 HPA 的计算基准,必须设
           limits:   {cpu: 500m, memory: 512Mi}
         readinessProbe:
-          httpGet: {path: /, port: 80}
+          httpGet: {path: /wp-login.php, port: 80}
           initialDelaySeconds: 20
         volumeMounts:
         - {name: wp-data, mountPath: /var/www/html}
