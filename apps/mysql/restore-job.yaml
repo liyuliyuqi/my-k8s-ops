@@ -1,0 +1,46 @@
+# P4 恢复 Job:平时不跑,演练/灾难时 apply——把备份 PVC 里最新一份 dump 灌回去并计时
+# 用法:kubectl -n magedu apply -f restore-job.yaml && kubectl -n magedu logs -f job/mysql-restore
+# ⚠️ 再次演练前先删旧 Job(Job 不可原地更新):kubectl -n magedu delete job mysql-restore
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mysql-restore
+  namespace: magedu
+spec:
+  backoffLimit: 0            # 恢复失败不重试,人工看日志(盲目重试可能二次覆盖)
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        kubernetes.io/hostname: k8s-node1   # 与备份 PVC 同节点(backup-pvc 绑定处)
+      containers:
+      - name: restore
+        image: mysql:8.0
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mysql-secret
+              key: MYSQL_ROOT_PASSWORD
+        command: ["/bin/bash","-c"]
+        args:
+        - |
+          set -e
+          LATEST=$(ls -1t /backup/wordpress_*.sql | head -1)
+          echo "[恢复目标] $LATEST"
+          START=$(date +%s)
+          mysql -h mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
+            -e "DROP DATABASE IF EXISTS wordpress;" 2>/dev/null
+          mysql -h mysql -uroot -p"$MYSQL_ROOT_PASSWORD" < "$LATEST" 2>/dev/null
+          END=$(date +%s)
+          echo "[恢复完成] 耗时 $((END-START)) 秒"
+          # 自检:文章标题回来了才算数
+          mysql -h mysql -uroot -p"$MYSQL_ROOT_PASSWORD" wordpress --default-character-set=utf8mb4 -N -e \
+            "SELECT ID, post_title FROM wp_posts WHERE post_status='publish';" 2>/dev/null
+        volumeMounts:
+        - name: backup
+          mountPath: /backup
+      volumes:
+      - name: backup
+        persistentVolumeClaim:
+          claimName: backup-pvc

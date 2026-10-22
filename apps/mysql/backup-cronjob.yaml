@@ -1,0 +1,70 @@
+# P4 备份 CronJob:定时起 Pod 跑 mysqldump,干完即退(第一阶段 1.5 crontab 的云原生版)
+# 设计:备份落专用 PVC(local-path);参数沿用第一阶段验证过的组合;保留 7 份;MD5 校验;位点行单独存放
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: backup-pvc
+  namespace: magedu
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mysql-backup
+  namespace: magedu
+spec:
+  # 学习期每 30 分钟一次快速攒数据;生产改 "0 2 * * *" 凌晨低峰
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid          # 上一次没跑完就跳过本次,不叠加
+  successfulJobsHistoryLimit: 1      # 只留最近 1 次成功 Pod 记录
+  failedJobsHistoryLimit: 3          # 失败多留几份方便排错
+  jobTemplate:
+    spec:
+      backoffLimit: 1                # 失败重试 1 次就放弃
+      template:
+        spec:
+          restartPolicy: Never
+          # 钉 k8s-node1:镜像已在本地(mysql Pod 同款),且备份 PVC 会绑在本节点
+          nodeSelector:
+            kubernetes.io/hostname: k8s-node1
+          containers:
+          - name: dump
+            image: mysql:8.0
+            env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret   # 复用 P1 的 secret,密码不落明文
+                  key: MYSQL_ROOT_PASSWORD
+            command: ["/bin/bash","-c"]
+            args:
+            - |
+              set -e
+              DATE=$(date +%F_%H%M%S)
+              F=/backup/wordpress_$DATE.sql
+              START=$(date +%s)
+              mysqldump -h mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
+                --single-transaction --source-data=2 \
+                --databases wordpress > "$F" 2>/dev/null
+              END=$(date +%s)
+              md5sum "$F" > "$F.md5"
+              # 位点行单独存(--source-data=2 把 CHANGE MASTER 注释进 dump)
+              grep -m1 "CHANGE MASTER" "$F" | sed 's/^/ /' > "$F.pos"
+              # 保留最近 7 份,删更旧的(连带 .md5/.pos)
+              ls -1t /backup/wordpress_*.sql | tail -n +8 | while read old; do
+                rm -f "$old" "$old.md5" "$old.pos"
+              done
+              echo "[备份完成] $((END-START))s $(ls -lh "$F" | awk '{print $5, $9}')"
+              echo "[位点] $(cat "$F.pos")"
+            volumeMounts:
+            - name: backup
+              mountPath: /backup
+          volumes:
+          - name: backup
+            persistentVolumeClaim:
+              claimName: backup-pvc
