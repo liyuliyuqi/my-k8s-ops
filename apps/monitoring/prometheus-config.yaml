@@ -7,6 +7,12 @@ data:
   prometheus.yml: |
     global:
       scrape_interval: 15s
+    rule_files:
+    - /etc/prometheus/mysql-rules.yml
+    alerting:
+      alertmanagers:
+      - static_configs:
+        - targets: ["alertmanager:9093"]
     scrape_configs:
     - job_name: prometheus
       static_configs:
@@ -20,3 +26,15 @@ data:
     - job_name: mysqld
       static_configs:
       - targets: ["mysqld-exporter:9104"]
+  mysql-rules.yml: |
+    groups:
+    - name: mysql
+      rules:
+      - alert: MySQLDown
+        expr: mysql_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MySQL 数据库不可用 ({{ $labels.instance }})"
+          description: "mysqld-exporter 报告 mysql_up=0 已持续 1 分钟,请立即检查"
