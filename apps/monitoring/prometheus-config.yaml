@@ -17,3 +17,6 @@ data:
         - 172.30.211.117:9100
         - 172.30.211.114:9100
         - 172.30.211.115:9100
+    - job_name: mysqld
+      static_configs:
+      - targets: ["mysqld-exporter:9104"]

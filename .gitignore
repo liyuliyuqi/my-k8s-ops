@@ -1,1 +1,2 @@
 apps/mysql/secret.yaml
+apps/monitoring/mysqld-exporter-secret.yaml
