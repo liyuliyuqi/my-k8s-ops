@@ -7,7 +7,7 @@ on:
       - '.github/workflows/deploy.yml'
 
 jobs:
-  build-push-deploy:
+  build-push:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -16,17 +16,15 @@ jobs:
       - name: Login to ACR
         run: echo "${{ secrets.ACR_REGISTRY_PASSWORD }}" | docker login ${{ secrets.ACR_REGISTRY }} -u "${{ secrets.ACR_REGISTRY_USER }}" --password-stdin
 
-      - name: Build and push image
+      - name: Build and push
         run: |
           IMAGE=${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/myweb:${{ github.sha }}
           docker build -t "$IMAGE" apps/myweb
           docker push "$IMAGE"
 
-      - name: Deploy to k8s-master
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            kubectl -n magedu set image deployment/myweb web=${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/myweb:${{ github.sha }}
+  deploy:
+    runs-on: self-hosted
+    needs: build-push
+    steps:
+      - name: Rolling update
+        run: kubectl -n magedu set image deployment/myweb web=${{ secrets.ACR_REGISTRY }}/${{ secrets.ACR_NAMESPACE }}/myweb:${{ github.sha }}
